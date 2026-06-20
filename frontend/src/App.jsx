@@ -62,6 +62,53 @@ function MinimalGauge({ value, min = 0, max = 100, label = "", unit = "", color 
 }
 
 // ─────────────────────────────────────────────
+// KOMPONEN: Hitung & tampilkan durasi offline secara live
+// ─────────────────────────────────────────────
+function OfflineDuration({ since }) {
+  const [durasi, setDurasi] = useState('');
+
+  useEffect(() => {
+    // Parse timestamp format "DD/MM/YYYY HH:MM:SS WIB" atau "YYYY-MM-DD HH:MM:SS"
+    const parseTimestamp = (str) => {
+      if (!str) return null;
+      // Format: "20/06/2026 18:53:09 WIB"
+      const wibMatch = str.match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}:\d{2}:\d{2})/);
+      if (wibMatch) {
+        const [, d, m, y, t] = wibMatch;
+        return new Date(`${y}-${m}-${d}T${t}+07:00`);
+      }
+      // Format: "2026-06-20 18:53:09"
+      const isoMatch = str.match(/(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})/);
+      if (isoMatch) {
+        return new Date(`${isoMatch[1]}T${isoMatch[2]}+07:00`);
+      }
+      return null;
+    };
+
+    const hitung = () => {
+      const waktuOffline = parseTimestamp(since);
+      if (!waktuOffline) { setDurasi('tidak diketahui'); return; }
+      const selisih = Math.floor((Date.now() - waktuOffline.getTime()) / 1000);
+      if (selisih < 60)   setDurasi(`${selisih} detik`);
+      else if (selisih < 3600) setDurasi(`${Math.floor(selisih / 60)} menit ${selisih % 60} detik`);
+      else {
+        const j = Math.floor(selisih / 3600);
+        const m = Math.floor((selisih % 3600) / 60);
+        setDurasi(`${j} jam ${m} menit`);
+      }
+    };
+
+    hitung();
+    const id = setInterval(hitung, 1000);
+    return () => clearInterval(id);
+  }, [since]);
+
+  return (
+    <span className="text-[10px] font-mono text-rose-300 font-semibold">{durasi}</span>
+  );
+}
+
+// ─────────────────────────────────────────────
 // HELPERS — ikut persis field `status` dari simulator Python
 // ─────────────────────────────────────────────
 
@@ -397,6 +444,22 @@ export default function App() {
                             {sensorCond ?? 'N/A'}
                           </span>
                         </div>
+
+                        {/* OFFLINE SEJAK — hanya tampil jika node OFFLINE */}
+                        {connStatus === 'OFFLINE' && (
+                          <div className="mt-2 pt-2 border-t border-rose-500/20 rounded-lg bg-rose-950/20 p-1.5 space-y-1">
+                            <div className="flex justify-between items-center">
+                              <span className="text-rose-400 text-[10px] font-semibold">🔴 Offline sejak:</span>
+                              <span className="text-rose-300 font-mono text-[10px] font-bold">
+                                {n.formatted_time || n.timestamp || 'tidak diketahui'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-rose-400/70 text-[10px]">Durasi:</span>
+                              <OfflineDuration since={n.formatted_time || n.timestamp} />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </Popup>
@@ -523,19 +586,44 @@ export default function App() {
               </span>
             </div>
           </div>
-          <div className="border-t border-slate-800 pt-2 mt-1 flex flex-col gap-1 bg-slate-950/40 p-2 rounded-xl border border-slate-800/50">
+          <div className={`border-t pt-2 mt-1 flex flex-col gap-1.5 p-2 rounded-xl border ${
+            isNodeOffline
+              ? 'border-rose-500/30 bg-rose-950/20'
+              : 'border-slate-800/50 bg-slate-950/40'
+          }`}>
+            {/* Identifikasi node */}
             <div className="flex justify-between items-center">
               <span className="text-[10px] text-slate-400">Identifikasi:</span>
-              <span className={`text-xs font-extrabold tracking-tight uppercase font-sans ${!selectedNode || isNodeOffline ? 'text-slate-500' : 'text-emerald-400'}`}>
-                {selectedNode ? (selectedNode.node_name || selectedNode.node_id?.replace('node_', 'Node ')) : 'BELUM ADA NODE'}
+              <span className={`text-xs font-extrabold tracking-tight uppercase font-sans ${
+                !selectedNode ? 'text-slate-500' : isNodeOffline ? 'text-rose-400' : 'text-emerald-400'
+              }`}>
+                {selectedNode
+                  ? (selectedNode.node_name || selectedNode.node_id?.replace('node_', 'Node '))
+                  : 'BELUM ADA NODE'}
               </span>
             </div>
-            <div className="flex justify-between items-center text-[10px]">
-              <span className="text-slate-500">Terakhir Diterima:</span>
-              <span className="text-slate-300 font-mono font-medium tracking-tight text-[10px]">
-                {!selectedNode || isNodeOffline ? '---' : (selectedNode.formatted_time || currentTime)}
+
+            {/* Baris timestamp — label berubah sesuai status */}
+            <div className="flex justify-between items-center">
+              <span className={`text-[10px] font-semibold ${isNodeOffline ? 'text-rose-400' : 'text-slate-500'}`}>
+                {isNodeOffline ? '🔴 Offline sejak:' : 'Terakhir Diterima:'}
+              </span>
+              <span className={`font-mono font-medium tracking-tight text-[10px] ${
+                isNodeOffline ? 'text-rose-300' : 'text-slate-300'
+              }`}>
+                {!selectedNode
+                  ? '---'
+                  : (selectedNode.formatted_time || selectedNode.timestamp || currentTime)}
               </span>
             </div>
+
+            {/* Durasi offline — hanya tampil jika node OFFLINE */}
+            {isNodeOffline && selectedNode?.formatted_time && (
+              <div className="flex justify-between items-center border-t border-rose-500/20 pt-1.5 mt-0.5">
+                <span className="text-[10px] text-rose-400/70">Durasi offline:</span>
+                <OfflineDuration since={selectedNode.formatted_time} />
+              </div>
+            )}
           </div>
         </div>
       </div>
